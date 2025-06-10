@@ -5,82 +5,63 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 API_KEY = "ccf35c43-496e-4514-b595-1039601450f2"
-BASE_URL = "https://api.helius.xyz/v0"
+BASE = "https://api.helius.xyz/v0"
 
 PUMPSWAP_PROG = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
-JUPITER_PROG   = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-
+JUPITER_PROG = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-st.set_page_config(page_title="🪙 Solana 新发币监听", layout="wide")
-st_autorefresh(interval=5000, key="auto_refresh")
+st.set_page_config(page_title="🪙 Solana DEX 已上架新币监听", layout="wide")
+st_autorefresh(interval=5000, key="auto")
 
-st.title("🪙 Solana链上过去7日交易最活跃新发代币")
-st.caption("实时监听过去7日创建并交易活跃的新币（最多20个），每 5 秒刷新")
+st.title("🪙 最近7天已上架至 PumpSwap 或 Jupiter 并交易活跃的新币")
+st.caption("仅显示那些在这两个 DEX 上出现交易、最活跃的20个 token，每 5 秒刷新")
 
 @st.cache_data(ttl=60)
-def fetch_new_mints():
-    url = f"{BASE_URL}/tokens/created?api-key={API_KEY}&days=7"
-    r = requests.get(url)
-    if r.status_code != 200:
-        st.error(f"获取新币失败：{r.status_code} {r.text}")
-        return []
-    return r.json()
+def fetch_created_mints(days=7):
+    r = requests.get(f"{BASE}/tokens/created?api-key={API_KEY}&days={days}")
+    return r.json() if r.status_code==200 else []
 
 @st.cache_data(ttl=60)
 def fetch_transfers(mint):
-    start_ts = int(seven_days_ago.timestamp())
-    url = f"{BASE_URL}/tokens/{mint}/transfers?api-key={API_KEY}&startTime={start_ts}&limit=500"
-    r = requests.get(url)
-    return r.json() if r.status_code == 200 else []
+    start = int(seven_days_ago.timestamp())
+    r = requests.get(f"{BASE}/tokens/{mint}/transfers?api-key={API_KEY}&startTime={start}&limit=500")
+    return r.json() if r.status_code==200 else []
 
 def analyze_mints(mints, top_n=20):
-    recs = []
+    rows = []
     for item in mints:
-        mint = item.get("mint")
-        ts = item.get("timestamp")
+        mint = item["mint"]
+        ts = item["timestamp"]
         transfers = fetch_transfers(mint)
+        pumps = [tx for tx in transfers if tx.get("programId")==PUMPSWAP_PROG]
+        jups = [tx for tx in transfers if tx.get("programId")==JUPITER_PROG]
         total = len(transfers)
-        if total == 0:
+        if total == 0 or (not pumps and not jups):
             continue
-
-        wallets = set()
-        pump_cnt = jup_cnt = 0
-        for tx in transfers:
-            wallets.add(tx.get("source"))
-            wallets.add(tx.get("destination"))
-            prog = tx.get("programId", "")
-            if prog == PUMPSWAP_PROG:
-                pump_cnt += 1
-            if prog == JUPITER_PROG:
-                jup_cnt += 1
-
-        recs.append({
+        rows.append({
             "Mint": mint,
-            "创建时间": datetime.utcfromtimestamp(ts).strftime("%Y‑%m‑%d %H:%M"),
-            "交易笔数": total,
-            "活跃钱包数": len(wallets),
-            "PumpSwap%": pump_cnt / total,
-            "Jupiter%": jup_cnt / total
+            "创建时间": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
+            "总交易": total,
+            "PumpSwap交易": len(pumps),
+            "Jupiter交易": len(jups),
+            "PumpSwap占比": len(pumps)/total,
+            "Jupiter占比": len(jups)/total
         })
-
-    df = pd.DataFrame(recs)
-    if df.empty:
-        return df
-    df = df.sort_values("交易笔数", ascending=False).head(top_n)
-    df["PumpSwap%"] = df["PumpSwap%"].apply(lambda x: f"{x:.2%}")
-    df["Jupiter%"] = df["Jupiter%"].apply(lambda x: f"{x:.2%}")
+    df = pd.DataFrame(rows).sort_values("总交易", ascending=False).head(top_n)
+    for col in ["PumpSwap占比", "Jupiter占比"]:
+        df[col] = df[col].apply(lambda x: f"{x:.2%}")
     return df
 
-mints = fetch_new_mints()
+mints = fetch_created_mints()
 df = analyze_mints(mints)
 
 if df.empty:
-    st.info("暂无活跃新币（最近创建且有交易）")
+    st.info("最近7天内，PumpSwap 或 Jupiter 上架后进行交易的新币暂无或尚未活跃。")
 else:
-    def highlight_red(val):
+    def hl(val):
         try:
-            return 'color:red; font-weight:bold' if float(val.strip('%')) > 50 else ''
+            return 'color:red;font-weight:bold' if float(val.strip('%')) > 20 else ''
         except:
             return ''
-    st.dataframe(df.style.applymap(highlight_red, subset=["PumpSwap%", "Jupiter%"]), use_container_width=True)
+    st.dataframe(df.style.applymap(hl, subset=["PumpSwap占比","Jupiter占比"]), use_container_width=True)
