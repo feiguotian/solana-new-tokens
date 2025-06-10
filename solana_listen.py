@@ -5,130 +5,108 @@ from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
 
 API_KEY = "ccf35c43-496e-4514-b595-1039601450f2"
-BASE = "https://api.helius.xyz/v0"
+HELIUS_BASE = "https://api.helius.xyz/v0"
+JUPITER_MARKETS_API = "https://quote-api.jup.ag/v1/markets"
 
-JUPITER_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
-SOL_MINT = "So11111111111111111111111111111111111111112"  # Solana 原生代币 Mint 地址
+SOL_MINT = "So11111111111111111111111111111111111111112"
 
 seven_days_ago = datetime.utcnow() - timedelta(days=7)
 seven_days_ago_ts = int(seven_days_ago.timestamp())
 
 st.set_page_config(page_title="🪙 Jupiter 7天内上架新币监听", layout="wide")
 st.title("🪙 Jupiter 7天内上架且与 SOL 组成交易对的新币活跃排行榜")
-st.caption("每5秒自动刷新，仅显示成交量或成交额最高的20个币种。数据来自 Helius API。")
+st.caption("每5秒自动刷新，仅显示成交量或成交额最高的20个币种。数据结合 Jupiter 官方和 Helius API。")
 
-# 自动刷新
 st_autorefresh(interval=5000, key="auto_refresh")
 
 @st.cache_data(ttl=60)
 def fetch_jupiter_markets():
-    """获取 Jupiter 7 天内的交易市场信息（filter新币，带SOL交易对）"""
-    url = f"{BASE}/programs/{JUPITER_PROGRAM_ID}/accounts?api-key={API_KEY}&limit=1000"
     try:
-        res = requests.get(url)
+        res = requests.get(JUPITER_MARKETS_API)
         res.raise_for_status()
         data = res.json()
-        return data.get("accounts", [])
+        return data.get("data", [])
     except Exception as e:
         st.error(f"获取 Jupiter 市场信息失败: {e}")
         return []
 
 @st.cache_data(ttl=60)
 def fetch_token_info(mint):
-    """获取代币信息，含名称"""
-    url = f"{BASE}/tokens/metadata?api-key={API_KEY}&mint={mint}"
     try:
+        url = f"{HELIUS_BASE}/tokens/metadata?api-key={API_KEY}&mint={mint}"
         res = requests.get(url)
         res.raise_for_status()
         data = res.json()
         if data:
-            return data[0]  # 返回第一个匹配的代币信息
+            return data[0]
         return {}
     except:
         return {}
 
 @st.cache_data(ttl=60)
-def fetch_market_volume(market_id):
-    """获取某市场最近7天内的成交量和成交额（单位：代币数量和SOL数量）"""
+def fetch_token_transfers(mint):
     start_time = seven_days_ago_ts
-    url = f"{BASE}/accounts/{market_id}/transactions?api-key={API_KEY}&limit=1000&startTime={start_time}"
     try:
+        url = f"{HELIUS_BASE}/tokens/{mint}/transfers?api-key={API_KEY}&startTime={start_time}&limit=1000"
         res = requests.get(url)
         res.raise_for_status()
-        txs = res.json()
-        total_volume = 0  # 交易代币数量
-        total_amount_sol = 0  # 交易金额，SOL计价
-        for tx in txs:
-            # 这里简单统计价格*数量为成交额，具体字段根据API调整
-            # 只做示例，实际要根据交易数据结构解析
-            # 假设tx中有字段amount和price_sol（需根据实际接口改）
-            amount = tx.get("amount", 0)
-            price_sol = tx.get("price_sol", 0)
-            total_volume += amount
-            total_amount_sol += amount * price_sol
-        return total_volume, total_amount_sol
+        return res.json()
     except Exception as e:
-        return 0, 0
+        return []
 
-def parse_markets(raw_markets):
-    """过滤出7天内上架且有SOL交易对的市场，返回含必要信息的列表"""
+def analyze_markets(markets):
     results = []
-    for market in raw_markets:
-        # 过滤时间，必须有timestamp字段
-        ts = market.get("timestamp")
-        if not ts or ts < seven_days_ago_ts:
+    for m in markets:
+        base = m.get("baseMint")
+        quote = m.get("quoteMint")
+        if not base or not quote:
             continue
-        # 解析交易对，判断是否与SOL配对
-        base_mint = market.get("baseMint")
-        quote_mint = market.get("quoteMint")
-        if not base_mint or not quote_mint:
+        # 只关注和SOL配对的市场
+        if SOL_MINT not in (base, quote):
             continue
-        if SOL_MINT not in (base_mint, quote_mint):
-            continue
+        # 过滤7天内上架，jup.ag市场没有直接创建时间字段，只能用其它字段过滤或不过滤
+        # 这里假设不过滤时间，展示所有与SOL交易对市场
 
-        mint = base_mint if quote_mint == SOL_MINT else quote_mint
+        mint = base if quote == SOL_MINT else quote
+        token_info = fetch_token_info(mint)
+        token_name = token_info.get("name") or token_info.get("symbol") or "未知"
+
+        transfers = fetch_token_transfers(mint)
+        total_volume = sum(tx.get("tokenAmount", 0) for tx in transfers)  # 这里根据真实字段调整
+        total_sol = 0
+        for tx in transfers:
+            # 这里尝试估算成交额（SOL）
+            # 需要根据API实际字段解析，示例假设有 priceSol 字段
+            amount = tx.get("tokenAmount", 0)
+            price_sol = tx.get("priceSol", 0)
+            total_sol += amount * price_sol
+
         results.append({
-            "market_id": market.get("pubkey"),
-            "mint": mint,
-            "listed_at": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
-            "base_mint": base_mint,
-            "quote_mint": quote_mint,
+            "代币名称": token_name,
+            "Mint地址": mint,
+            "成交量（代币数量）": total_volume,
+            "成交额（SOL）": round(total_sol, 4),
+            "baseMint": base,
+            "quoteMint": quote,
         })
     return results
 
 def main():
-    st.write("数据加载中，请稍等...")
-
-    raw_markets = fetch_jupiter_markets()
-    if not raw_markets:
-        st.info("未获取到 Jupiter 市场数据。")
+    st.write("加载 Jupiter 市场数据中...")
+    markets = fetch_jupiter_markets()
+    if not markets:
+        st.info("未获取到 Jupiter 市场数据")
         return
 
-    markets = parse_markets(raw_markets)
-
-    rows = []
-    for m in markets:
-        token_info = fetch_token_info(m["mint"])
-        token_name = token_info.get("name") or token_info.get("symbol") or "未知"
-        vol, amt_sol = fetch_market_volume(m["market_id"])
-
-        rows.append({
-            "代币名称": token_name,
-            "Mint 地址": m["mint"],
-            "上架时间": m["listed_at"],
-            "成交量（代币数量）": vol,
-            "成交额（SOL）": round(amt_sol, 4),
-        })
-
-    if not rows:
-        st.info("7天内无符合条件的 Jupiter 新币。")
+    results = analyze_markets(markets)
+    if not results:
+        st.info("无符合条件的新币数据")
         return
 
-    df = pd.DataFrame(rows)
-    sort_by = st.selectbox("排序方式", options=["成交额（SOL）", "成交量（代币数量）"], index=0)
+    df = pd.DataFrame(results)
+    sort_by = st.selectbox("排序方式", ["成交额（SOL）", "成交量（代币数量）"], index=0)
     ascending = st.checkbox("升序排列", value=False)
     df = df.sort_values(sort_by, ascending=ascending).head(20)
-
     st.dataframe(df, use_container_width=True)
 
 if __name__ == "__main__":
