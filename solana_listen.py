@@ -67,7 +67,6 @@ def get_jupiter_markets():
         if "error" in resp:
             st.error(f"RPC 错误：{resp['error']}")
             return []
-        st.success(f"共获取到 {len(resp.get('result', []))} 个 Jupiter 市场账户")
         return resp.get("result", [])
 
 def get_trade_stats(mint):
@@ -102,6 +101,34 @@ def main():
     if not accounts:
         st.warning("未获取到 Jupiter 市场账户数据")
         return
+
+    # 右侧边栏展示账户列表和总数
+    with st.sidebar:
+        st.header("Jupiter 市场账户列表")
+        st.write(f"共获取到 {len(accounts)} 个 Jupiter 市场账户")
+        sidebar_rows = []
+        for acc in accounts:
+            pubkey = acc.get("pubkey", "未知")
+            data_b64 = acc.get("account", {}).get("data", [None])[0]
+            parsed = parse_market_account(data_b64) if data_b64 else None
+            created_time = (
+                datetime.fromtimestamp(parsed["createdTs"]).strftime("%Y-%m-%d %H:%M:%S")
+                if parsed and parsed.get("createdTs")
+                else "未知"
+            )
+            base_mint = parsed.get("baseMint") if parsed else "解析失败"
+            quote_mint = parsed.get("quoteMint") if parsed else "解析失败"
+            sidebar_rows.append({
+                "账户地址": pubkey,
+                "创建时间": created_time,
+                "BaseMint": base_mint,
+                "QuoteMint": quote_mint,
+            })
+        if sidebar_rows:
+            sidebar_df = pd.DataFrame(sidebar_rows)
+            st.dataframe(sidebar_df, use_container_width=True)
+        else:
+            st.write("无有效市场账户数据")
 
     rows = []
     progress_bar = st.progress(0)
