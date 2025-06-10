@@ -1,6 +1,6 @@
-streamlit
-streamlit-autorefresh
-pandas
-requests
-solana
-pyarrow
+streamlit>=1.28.0
+streamlit-autorefresh>=0.3.1
+solana>=0.29.0
+requests>=2.31.0
+pandas>=2.0.0
+python-dotenv>=1.0.0  # 推荐用于管理API密钥
