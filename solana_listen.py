@@ -45,6 +45,16 @@ def parse_market_account(data_b64):
         "createdTs": created_ts
     }
 
+def safe_format_timestamp(ts):
+    # 判断是否合理时间戳：大于2001-09-09 (1000000000)且不大于当前时间戳+86400秒（防止未来时间）
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if ts is None or ts < 1000000000 or ts > now_ts + 86400:
+        return "未知"
+    try:
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "无效时间"
+
 def get_jupiter_markets():
     with st.spinner("正在获取 Jupiter 市场账户..."):
         payload = {
@@ -102,7 +112,6 @@ def main():
         st.warning("未获取到 Jupiter 市场账户数据")
         return
 
-    # 右侧边栏展示账户列表和总数
     with st.sidebar:
         st.header("Jupiter 市场账户列表")
         st.write(f"共获取到 {len(accounts)} 个 Jupiter 市场账户")
@@ -111,11 +120,7 @@ def main():
             pubkey = acc.get("pubkey", "未知")
             data_b64 = acc.get("account", {}).get("data", [None])[0]
             parsed = parse_market_account(data_b64) if data_b64 else None
-            created_time = (
-                datetime.fromtimestamp(parsed["createdTs"]).strftime("%Y-%m-%d %H:%M:%S")
-                if parsed and parsed.get("createdTs")
-                else "未知"
-            )
+            created_time = safe_format_timestamp(parsed["createdTs"]) if parsed else "未知"
             base_mint = parsed.get("baseMint") if parsed else "解析失败"
             quote_mint = parsed.get("quoteMint") if parsed else "解析失败"
             sidebar_rows.append({
@@ -155,7 +160,7 @@ def main():
 
         rows.append({
             "代币Mint": parsed["baseMint"],
-            "上架时间": datetime.fromtimestamp(parsed["createdTs"]).strftime("%Y-%m-%d %H:%M:%S"),
+            "上架时间": safe_format_timestamp(parsed["createdTs"]),
             "成交量（代币）": f"{stats['volume']:.2f}",
             "成交额（SOL）": f"{stats['amount_sol']:.4f}"
         })
