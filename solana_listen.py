@@ -4,18 +4,14 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
-# —— 固定 Helius API Key，无需自填
 API_KEY = "ccf35c43-496e-4514-b595-1039601450f2"
 BASE_URL = "https://api.helius.xyz/v0"
 
-# 🎯 自行替换为真实的PumpSwap和Jupiter ProgramID（如不知道可先留空）
-PUMPSWAP_PROG = ""
-JUPITER_PROG = ""
+PUMPSWAP_PROG = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+JUPITER_PROG   = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 
-# 时间范围：过去 7 天
 seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-# 页面配置 + 自动刷新
 st.set_page_config(page_title="🪙 Solana 新发币监听", layout="wide")
 st_autorefresh(interval=5000, key="auto_refresh")
 
@@ -42,31 +38,30 @@ def analyze_mints(mints, top_n=20):
     recs = []
     for item in mints:
         mint = item.get("mint")
-        created_ts = item.get("timestamp")
+        ts = item.get("timestamp")
         transfers = fetch_transfers(mint)
         total = len(transfers)
         if total == 0:
             continue
 
         wallets = set()
-        pump_count = 0
-        jup_count = 0
+        pump_cnt = jup_cnt = 0
         for tx in transfers:
             wallets.add(tx.get("source"))
             wallets.add(tx.get("destination"))
             prog = tx.get("programId", "")
             if prog == PUMPSWAP_PROG:
-                pump_count += 1
+                pump_cnt += 1
             if prog == JUPITER_PROG:
-                jup_count += 1
+                jup_cnt += 1
 
         recs.append({
             "Mint": mint,
-            "创建时间": datetime.utcfromtimestamp(created_ts).strftime("%Y‑%m‑%d %H:%M"),
+            "创建时间": datetime.utcfromtimestamp(ts).strftime("%Y‑%m‑%d %H:%M"),
             "交易笔数": total,
             "活跃钱包数": len(wallets),
-            "PumpSwap%": pump_count / total,
-            "Jupiter%": jup_count / total
+            "PumpSwap%": pump_cnt / total,
+            "Jupiter%": jup_cnt / total
         })
 
     df = pd.DataFrame(recs)
@@ -77,7 +72,6 @@ def analyze_mints(mints, top_n=20):
     df["Jupiter%"] = df["Jupiter%"].apply(lambda x: f"{x:.2%}")
     return df
 
-# 主逻辑
 mints = fetch_new_mints()
 df = analyze_mints(mints)
 
@@ -86,8 +80,7 @@ if df.empty:
 else:
     def highlight_red(val):
         try:
-            val_f = float(val.strip('%'))
-            return 'color:red; font-weight:bold' if val_f > 50 else ''
+            return 'color:red; font-weight:bold' if float(val.strip('%')) > 50 else ''
         except:
             return ''
     st.dataframe(df.style.applymap(highlight_red, subset=["PumpSwap%", "Jupiter%"]), use_container_width=True)
