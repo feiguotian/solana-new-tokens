@@ -1,126 +1,86 @@
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 import requests
-from datetime import datetime, timedelta
-import pytz
 import pandas as pd
+from datetime import datetime, timedelta
 
-# 固定你的API KEY，不用每次输入
+# ✅ 固定你的 Helius API Key
 API_KEY = "ccf35c43-496e-4514-b595-1039601450f2"
-BASE_URL = f"https://api.helius.xyz/v0"
+BASE_URL = "https://api.helius.xyz/v0"
 
-# 这两个是PumpSwap和Jupiter的ProgramID（示例，准确ID请替换）
-PUMPSWAP_PROGRAM_ID = "PSwpF1fQ4NsThF1Dj28Rh3XWRXCR92qvD1V5xU3NTdW"
-JUPITER_PROGRAM_ID = "JUP3r1sTpVTTf4tu9PpaFyNNm3b85v8B9kkKMZ6VmF3"
+# ✅ PumpSwap & Jupiter ProgramID（示例，优先用准确值替换）
+PUMPSWAP_PROG = "PSwpF1fQ4NsThF1Dj28Rh3XWRXCR92qvD1V5xU3NTdW"
+JUPITER_PROG = "JUP3r1sTpVTTf4tu9PpaFyNNm3b85v8B9kkKMZ6VmF3"
 
-# 设置时间范围 - 7天内
-now = datetime.utcnow().replace(tzinfo=pytz.UTC)
-seven_days_ago = now - timedelta(days=7)
+# 设置时间范围：过去7天
+seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
-# 页面配置和自动刷新 每5秒刷新一次
-st.set_page_config(page_title="Solana 新发币监听", layout="wide")
-st_autorefresh(interval=5000, limit=None, key="refresh")
+# 📄 页面配置 & 自动刷新
+st.set_page_config(page_title="🪙 Solana 新发币监听", layout="wide")
+st_autorefresh(interval=5000, key="auto")
+st.title("🪙 Solana链上过去7日交易最活跃新发代币")
+st.caption("实时监听过去7日新发且交易活跃的新币，最多20个。数据每 5 秒刷新")
 
-st.title("🚀 Solana链上过去7日交易最活跃的新发代币")
-st.caption("实时监听Solana链上7日创建并交易活跃的新代币，最多显示20个。\n\n数据每5秒自动刷新 | 来自 Helius + Streamlit")
-
-@st.cache_data(ttl=60)
-def get_new_tokens():
-    url = f"{BASE_URL}/addresses/11111111111111111111111111111111/transactions?api-key={API_KEY}&limit=200"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        txs = res.json()
-    except Exception as e:
-        st.error(f"获取交易失败: {e}")
+# 获取最近7天创建的新币
+@st.cache(ttl=60)
+def fetch_new_mints(days=7):
+    url = f"{BASE_URL}/tokens/created?api-key={API_KEY}&days={days}"
+    r = requests.get(url)
+    if r.status_code != 200:
+        st.error(f"获取新币失败: {r.status_code} {r.text}")
         return []
+    return r.json()  # 每项有 mint, timestamp
 
-    new_mints = {}
-    for tx in txs:
-        ts = tx.get("timestamp")
-        if not ts:
+# 查 mint 的交易明细
+@st.cache(ttl=60)
+def fetch_transfers(mint):
+    start = int(seven_days_ago.timestamp())
+    url = f"{BASE_URL}/tokens/{mint}/transfers?api-key={API_KEY}&startTime={start}&limit=500"
+    r = requests.get(url)
+    return r.json() if r.status_code == 200 else []
+
+# 主逻辑
+def analyze_top_mints(mints, top_n=20):
+    recs = []
+    for token in mints:
+        mint = token["mint"]
+        ts = token["timestamp"]
+        transfers = fetch_transfers(mint)
+        total = len(transfers)
+        if total == 0:
             continue
-        tx_time = datetime.utcfromtimestamp(ts).replace(tzinfo=pytz.UTC)
-        if tx_time < seven_days_ago:
-            continue
-        for ix in tx.get("instructions", []):
-            if ix.get("program") == "spl-token" and ix.get("parsed", {}).get("type") == "initializeMint":
-                mint = ix.get("accounts", [None])[0]
-                if mint and mint not in new_mints:
-                    new_mints[mint] = tx_time
-    # 返回新mint及创建时间，按时间倒序排序
-    sorted_list = sorted(new_mints.items(), key=lambda x: x[1], reverse=True)
-    return sorted_list[:20]
-
-@st.cache_data(ttl=60)
-def get_token_transfers(mint):
-    start_time = int(seven_days_ago.timestamp())
-    url = f"{BASE_URL}/tokens/{mint}/transfers?api-key={API_KEY}&startTime={start_time}&limit=500"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except:
-        return []
-
-def analyze_tokens(mints):
-    rows = []
-    for mint, created_at in mints:
-        transfers = get_token_transfers(mint)
-        wallet_set = set()
-        pumpswap_count = 0
-        jupiter_count = 0
-        total_count = len(transfers)
-
+        wallets = set()
+        pump_cnt = jup_cnt = 0
         for tx in transfers:
-            wallet_set.add(tx.get("source"))
-            wallet_set.add(tx.get("destination"))
-            program_id = tx.get("programId")
-            if program_id == PUMPSWAP_PROGRAM_ID:
-                pumpswap_count += 1
-            if program_id == JUPITER_PROGRAM_ID:
-                jupiter_count += 1
+            wallets.add(tx.get("source"))
+            wallets.add(tx.get("destination"))
+            prog = tx.get("programId", "")
+            if prog == PUMPSWAP_PROG: pump_cnt += 1
+            if prog == JUPITER_PROG: jup_cnt += 1
 
-        # 计算占比，防止除零
-        pumpswap_share = pumpswap_count / total_count if total_count else 0
-        jupiter_share = jupiter_count / total_count if total_count else 0
-
-        rows.append({
-            "Token Mint": mint,
-            "创建时间": created_at.strftime("%Y-%m-%d %H:%M"),
-            "交易笔数": total_count,
-            "活跃钱包数": len(wallet_set),
-            "PumpSwap占比": pumpswap_share,
-            "Jupiter占比": jupiter_share
+        recs.append({
+            "Mint": mint,
+            "创建时间": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
+            "交易笔数": total,
+            "活跃钱包数": len(wallets),
+            "PumpSwap%": pump_cnt/total,
+            "Jupiter%": jup_cnt/total
         })
-    return rows
+    df = pd.DataFrame(recs).sort_values("交易笔数", ascending=False).head(top_n)
+    return df
 
-def render_table(data):
-    if not data:
-        st.info("暂无新币数据，等待更新...")
-        return
+# 展示
+mints = fetch_new_mints()
+df = analyze_top_mints(mints)
 
-    df = pd.DataFrame(data)
-
-    # 转换占比为百分比格式，便于展示
-    df["PumpSwap占比"] = df["PumpSwap占比"].apply(lambda x: f"{x:.2%}")
-    df["Jupiter占比"] = df["Jupiter占比"].apply(lambda x: f"{x:.2%}")
-
-    # 样式：占比大于20%的显示红色
-    def color_red(val):
+if df.empty:
+    st.info("暂无新币数据，等待更新...")
+else:
+    df["PumpSwap%"] = df["PumpSwap%"].apply(lambda x: f"{x:.2%}")
+    df["Jupiter%"] = df["Jupiter%"].apply(lambda x: f"{x:.2%}")
+    def style_func(v):
         try:
-            return 'color: red;' if float(val.strip('%')) > 20 else ''
+            return "color:red;" if float(v.strip('%')) > 50 else ""
         except:
-            return ''
-
-    styled_df = df.style.applymap(color_red, subset=["PumpSwap占比", "Jupiter占比"])
-
-    st.table(styled_df)
-
-def main():
-    mints = get_new_tokens()
-    data = analyze_tokens(mints)
-    render_table(data)
-
-if __name__ == "__main__":
-    main()
+            return ""
+    st.dataframe(df.style.applymap(style_func, subset=["PumpSwap%", "Jupiter%"]), use_container_width=True)
