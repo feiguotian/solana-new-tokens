@@ -1,6 +1,7 @@
-streamlit>=1.28.0
-streamlit-autorefresh>=0.3.1
-solana>=0.29.0
-requests>=2.31.0
-pandas>=2.0.0
-python-dotenv>=1.0.0  # 推荐用于管理API密钥
+streamlit==1.45.1
+streamlit-autorefresh==1.0.1
+solana==0.29.0  # 确认可用的稳定版本
+solders==0.26.0  # solana的依赖项
+requests==2.32.4
+pandas==2.3.0
+python-dotenv==1.1.0
