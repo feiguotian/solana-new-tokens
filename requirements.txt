@@ -1,3 +1,4 @@
+pyarrow
 streamlit
 streamlit-autorefresh
 pyarrow
