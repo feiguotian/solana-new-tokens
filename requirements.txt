@@ -4,3 +4,4 @@ streamlit-autorefresh
 pyarrow
 pandas
 requests
+solana
