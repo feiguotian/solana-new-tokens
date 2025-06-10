@@ -24,7 +24,6 @@ st.caption("数据实时刷新，每5秒更新 | 来自 Jupiter Program + Helius
 
 def fetch_jupiter_markets():
     try:
-        # getProgramAccounts 需要传入 PublicKey 类型
         accounts_resp = client.get_program_accounts(JUPITER_PROG, limit=1000)
         if "result" not in accounts_resp or not accounts_resp["result"]:
             return []
@@ -33,17 +32,24 @@ def fetch_jupiter_markets():
         st.error(f"❌ 获取 Jupiter 市场信息失败: {e}")
         return []
 
-def parse_market_account(data):
-    # 此处是示例，需要根据 Jupiter 市场账户数据结构解码
-    # 这里只简单示意：实际你需要反序列化bytes得到市场信息，比如mint地址、baseMint、quoteMint、创建时间等
-    # 由于反序列化较复杂，以下示意取mint等假数据
+def parse_market_account(acc):
+    # 这里简单示意如何解析账户数据：
+    # 实际使用请替换为正确的反序列化逻辑，依据Jupiter市场数据格式
     try:
-        # 以下示例假设数据以某种格式存储，你需要替换为正确的解析逻辑
-        # 这里暂时mock数据结构，供展示用
-        mint = "示例Mint地址"
+        # acc["account"]["data"]是base64编码字符串，需要解码处理
+        data = acc.get("account", {}).get("data", [None, None])
+        if not data or data[0] is None:
+            return None
+        import base64
+        decoded = base64.b64decode(data[0])
+        # 示例：假设offset和长度，读取mint地址等信息（需要根据实际格式调整）
+        # 这里用占位符模拟
+        mint = "示例Mint地址1234"
         base_mint = SOL_MINT
-        quote_mint = "示例交易对Mint"
-        created_ts = int(datetime.utcnow().timestamp()) - 3600 * 24  # 模拟1天前创建
+        quote_mint = "示例交易对Mint5678"
+        # 模拟创建时间，取当前时间减随机小时数
+        import random
+        created_ts = int(datetime.utcnow().timestamp()) - random.randint(0, 7*24)*3600
         return {
             "mint": mint,
             "base_mint": base_mint,
@@ -52,6 +58,11 @@ def parse_market_account(data):
         }
     except Exception:
         return None
+
+def get_token_name(mint):
+    # 你可以扩展此函数调用Solana Token List等接口获取代币名称
+    # 目前简单返回mint后8位示意
+    return mint[-8:]
 
 def filter_and_enrich_markets(accounts):
     rows = []
@@ -62,19 +73,17 @@ def filter_and_enrich_markets(accounts):
         parsed = parse_market_account(acc)
         if not parsed:
             continue
-        # 只看base或quote是SOL的市场对
         if parsed["base_mint"] != SOL_MINT and parsed["quote_mint"] != SOL_MINT:
             continue
-        # 只要7天内创建
         if parsed["created_ts"] < seven_days_ago_ts:
             continue
 
-        # 这里需要调用Helius或者其他接口查询该市场对应代币的实时成交量和成交额
-        # 以下用模拟数据替代，生产环境请替换为真实数据获取逻辑
-        volume = 12345.67   # 模拟成交量
-        amount_sol = 890.12 # 模拟成交额
+        # 模拟成交量和成交额，真实项目请调用相关API替换
+        volume = round(1000 + (now_ts - parsed["created_ts"]) % 1000, 2)
+        amount_sol = round(100 + (now_ts - parsed["created_ts"]) % 100, 2)
 
         rows.append({
+            "代币名称": get_token_name(parsed["mint"]),
             "代币Mint": parsed["mint"],
             "交易对BaseMint": parsed["base_mint"],
             "交易对QuoteMint": parsed["quote_mint"],
@@ -83,17 +92,15 @@ def filter_and_enrich_markets(accounts):
             "成交额(SOL)": amount_sol
         })
 
-    # 按成交额降序排序，只保留前20个
     rows = sorted(rows, key=lambda x: x["成交额(SOL)"], reverse=True)[:20]
-
     return rows
 
 def main():
     with st.spinner("数据加载中，请稍等..."):
         accounts = fetch_jupiter_markets()
+
     st.sidebar.header(f"📜 Jupiter 市场账户 共{len(accounts)}个")
     if accounts:
-        # 简单展示账户列表
         account_list = [acc["pubkey"] for acc in accounts]
         st.sidebar.write(account_list)
     else:
