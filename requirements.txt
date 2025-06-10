@@ -1,7 +1,6 @@
 pyarrow
 streamlit
 streamlit-autorefresh
-pyarrow
 pandas
 requests
 solana
