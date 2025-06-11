@@ -1,6 +1,6 @@
 streamlit==1.45.1
 streamlit-autorefresh==1.0.1
-solana==0.29.0
+solana==0.30.0  # 更新到兼容solders 0.26.0的版本
 solders==0.26.0
 requests==2.32.4
 pandas==2.3.0
