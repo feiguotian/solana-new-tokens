@@ -1,7 +1,7 @@
 streamlit==1.45.1
 streamlit-autorefresh==1.0.1
-solana==0.29.0  # 确认可用的稳定版本
-solders==0.26.0  # solana的依赖项
+solana==0.29.0
+solders==0.26.0
 requests==2.32.4
 pandas==2.3.0
 python-dotenv==1.1.0
